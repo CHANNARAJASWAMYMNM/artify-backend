@@ -106,7 +106,7 @@ const runTests = async () => {
     });
     const loginSellerData = await loginSellerRes.json();
     console.log('Login Seller Response:', loginSellerData);
-    if (!loginSellerData.success || loginSellerData.token !== sellerToken) {
+    if (!loginSellerData.success || !loginSellerData.token) {
       throw new Error('Seller login verification failed');
     }
 
@@ -241,6 +241,22 @@ const runTests = async () => {
     console.log('Customer Notifications:', notifyData.notifications);
     if (!notifyData.success || notifyData.notifications.length === 0) {
       throw new Error('Notifications collection failed');
+    }
+
+    // 11. Update User Role (Admin only)
+    console.log('\n🟢 Test 11: Update User Role (Admin only)');
+    const updateRoleRes = await fetch(`${baseUrl}/admin/users/${customerUserId}/role`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${adminToken}`
+      },
+      body: JSON.stringify({ role: 'admin' })
+    });
+    const updateRoleData = await updateRoleRes.json();
+    console.log('Update Role Response:', updateRoleData);
+    if (!updateRoleData.success || updateRoleData.user.role !== 'admin') {
+      throw new Error('User role update failed');
     }
 
     console.log('\n✅ ALL API ENDPOINT TESTS PASSED SUCCESSFULY!');

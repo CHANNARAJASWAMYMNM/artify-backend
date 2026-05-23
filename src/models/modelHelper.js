@@ -11,61 +11,66 @@ class MockQuery {
   }
 
   populate(fields) {
-    // Support basic population e.g. 'seller', 'customer', 'product', 'items.product'
-    if (!fields) return this;
+    // Support basic population e.g. 'seller', 'customer', 'product', 'items.product', 'user'
+    if (!fields || !this.data) return this;
     const paths = typeof fields === 'string' ? fields.split(' ') : [fields];
 
+    const isArray = Array.isArray(this.data);
+    const items = isArray ? this.data : [this.data];
+
     for (let path of paths) {
-      // Handle simple path like 'seller'
-      if (path === 'seller') {
-        this.data = this.data.map(doc => {
-          if (doc.seller && typeof doc.seller === 'string') {
-            const sellerDoc = mockDB['User']?.find(u => u._id === doc.seller) || 
-                              mockDB['SellerProfile']?.find(s => s._id === doc.seller) || 
-                              mockDB['SellerProfile']?.find(s => s.user === doc.seller);
-            if (sellerDoc) {
-              return { ...doc, seller: JSON.parse(JSON.stringify(sellerDoc)) };
-            }
+      items.forEach(doc => {
+        if (!doc) return;
+        
+        // 1. Populate 'seller'
+        if (path === 'seller' && doc.seller && typeof doc.seller === 'string') {
+          const sellerDoc = mockDB['User']?.find(u => u._id === doc.seller) || 
+                            mockDB['SellerProfile']?.find(s => s._id === doc.seller) || 
+                            mockDB['SellerProfile']?.find(s => s.user === doc.seller);
+          if (sellerDoc) {
+            doc.seller = JSON.parse(JSON.stringify(sellerDoc));
           }
-          return doc;
-        });
-      }
-      if (path === 'customer') {
-        this.data = this.data.map(doc => {
-          if (doc.customer && typeof doc.customer === 'string') {
-            const custDoc = mockDB['User']?.find(u => u._id === doc.customer);
-            if (custDoc) {
-              return { ...doc, customer: JSON.parse(JSON.stringify(custDoc)) };
-            }
+        }
+        
+        // 2. Populate 'user'
+        if (path === 'user' && doc.user && typeof doc.user === 'string') {
+          const userDoc = mockDB['User']?.find(u => u._id === doc.user);
+          if (userDoc) {
+            doc.user = JSON.parse(JSON.stringify(userDoc));
           }
-          return doc;
-        });
-      }
-      if (path === 'product' || path === 'items.product') {
-        this.data = this.data.map(doc => {
-          if (path === 'product' && doc.product && typeof doc.product === 'string') {
-            const prodDoc = mockDB['Product']?.find(p => p._id === doc.product);
-            if (prodDoc) {
-              return { ...doc, product: JSON.parse(JSON.stringify(prodDoc)) };
-            }
+        }
+
+        // 3. Populate 'customer'
+        if (path === 'customer' && doc.customer && typeof doc.customer === 'string') {
+          const custDoc = mockDB['User']?.find(u => u._id === doc.customer);
+          if (custDoc) {
+            doc.customer = JSON.parse(JSON.stringify(custDoc));
           }
-          if (path === 'items.product' && Array.isArray(doc.items)) {
-            const updatedItems = doc.items.map(item => {
-              if (item.product && typeof item.product === 'string') {
-                const prodDoc = mockDB['Product']?.find(p => p._id === item.product);
-                if (prodDoc) {
-                  return { ...item, product: JSON.parse(JSON.stringify(prodDoc)) };
-                }
+        }
+
+        // 4. Populate 'product'
+        if (path === 'product' && doc.product && typeof doc.product === 'string') {
+          const prodDoc = mockDB['Product']?.find(p => p._id === doc.product);
+          if (prodDoc) {
+            doc.product = JSON.parse(JSON.stringify(prodDoc));
+          }
+        }
+
+        // 5. Populate 'items.product'
+        if (path === 'items.product' && Array.isArray(doc.items)) {
+          doc.items.forEach(item => {
+            if (item.product && typeof item.product === 'string') {
+              const prodDoc = mockDB['Product']?.find(p => p._id === item.product);
+              if (prodDoc) {
+                item.product = JSON.parse(JSON.stringify(prodDoc));
               }
-              return item;
-            });
-            return { ...doc, items: updatedItems };
-          }
-          return doc;
-        });
-      }
+            }
+          });
+        }
+      });
     }
 
+    this.data = isArray ? items : items[0];
     return this;
   }
 
@@ -105,7 +110,16 @@ class MockQuery {
   }
 
   then(onResolve, onReject) {
-    return Promise.resolve(this.data).then(onResolve, onReject);
+    const ModelClass = modelsRegistry[this.modelName];
+    let resolvedData;
+    if (Array.isArray(this.data)) {
+      resolvedData = this.data.map(item => ModelClass ? new ModelClass(item) : item);
+    } else if (this.data !== null && this.data !== undefined) {
+      resolvedData = ModelClass ? new ModelClass(this.data) : this.data;
+    } else {
+      resolvedData = this.data;
+    }
+    return Promise.resolve(resolvedData).then(onResolve, onReject);
   }
 }
 
@@ -115,15 +129,17 @@ const createMockModel = (modelName, schemaObj) => {
 
   class MockModel {
     constructor(data = {}) {
-      this._id = data._id || Math.random().toString(36).substring(2, 11);
-      this.createdAt = new Date().toISOString();
-      this.updatedAt = new Date().toISOString();
+      if (data && typeof data === 'object') {
+        Object.assign(this, data);
+      }
+      
+      this._id = (data && data._id) || Math.random().toString(36).substring(2, 11);
+      this.createdAt = (data && data.createdAt) || new Date().toISOString();
+      this.updatedAt = (data && data.updatedAt) || new Date().toISOString();
       
       // Load default values from schema where not provided
       for (const [key, prop] of Object.entries(schemaObj)) {
-        if (data[key] !== undefined) {
-          this[key] = data[key];
-        } else if (prop && prop.default !== undefined) {
+        if (this[key] === undefined && prop && prop.default !== undefined) {
           this[key] = typeof prop.default === 'function' ? prop.default() : prop.default;
         }
       }
@@ -140,7 +156,7 @@ const createMockModel = (modelName, schemaObj) => {
       } else {
         collection.push(docToSave);
       }
-      return docToSave;
+      return this;
     }
 
     static async create(data) {
@@ -202,13 +218,12 @@ const createMockModel = (modelName, schemaObj) => {
 
     static findOne(query = {}) {
       const item = mockDB[modelName].find(doc => MockModel._matches(doc, query));
-      // For findOne, it must return a query wrapper or null
-      return item ? new MockQuery(item, modelName) : null;
+      return new MockQuery(item || null, modelName);
     }
 
-    static async findById(id) {
+    static findById(id) {
       const item = mockDB[modelName].find(doc => doc._id === id);
-      return item ? new MockQuery(item, modelName) : null;
+      return new MockQuery(item || null, modelName);
     }
 
     static async findByIdAndUpdate(id, update, options = {}) {
@@ -234,7 +249,9 @@ const createMockModel = (modelName, schemaObj) => {
 
       updatedData.updatedAt = new Date().toISOString();
       collection[idx] = updatedData;
-      return JSON.parse(JSON.stringify(updatedData));
+      
+      const ModelClass = modelsRegistry[modelName];
+      return ModelClass ? new ModelClass(updatedData) : updatedData;
     }
 
     static async findByIdAndDelete(id) {
@@ -242,7 +259,9 @@ const createMockModel = (modelName, schemaObj) => {
       const idx = collection.findIndex(item => item._id === id);
       if (idx === -1) return null;
       const removed = collection.splice(idx, 1);
-      return removed[0];
+      
+      const ModelClass = modelsRegistry[modelName];
+      return ModelClass ? new ModelClass(removed[0]) : removed[0];
     }
 
     static async deleteOne(query) {
